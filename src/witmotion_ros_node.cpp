@@ -7,30 +7,45 @@
 #include <unistd.h>
 
 int main(int argc, char *argv[]) {
-
+  // Qt アプリケーションの初期化
   QCoreApplication app(argc, argv);
+
+  // ROS 2 初期化オプション
   rclcpp::InitOptions options{};
   options.shutdown_on_signal = true;
   rclcpp::init(argc, argv, options);
+
+  // シャットダウン時のコールバック
   rclcpp::on_shutdown([]() {
     RCLCPP_INFO(rclcpp::get_logger("MinimalPublisher"), "Shutting down QT...");
     QCoreApplication::exit(0);
     QThreadPool::globalInstance()->waitForDone();
-    RCLCPP_INFO(rclcpp::get_logger("MinimalPublisher"),"Shutting down node...");
+    RCLCPP_INFO(rclcpp::get_logger("MinimalPublisher"), "Shutting down node...");
     if (!rclcpp::shutdown()) {
-      RCLCPP_INFO(rclcpp::get_logger("MinimalPublisher"), "Shutting down node fail...");
+      RCLCPP_WARN(rclcpp::get_logger("MinimalPublisher"), "Shutting down node failed...");
     }
   });
 
-  ROSWitmotionSensorController &controller = ROSWitmotionSensorController::Instance();
-  auto node = controller.Start();
+  // ★ NodeOptions に ROS 2 の CLI 引数（namespace など）を反映させる
+  rclcpp::NodeOptions node_options;
+  node_options.allow_undeclared_parameters(true);
+  node_options.automatically_declare_parameters_from_overrides(true);
+
+  // ★ Sensor Controller のノードを起動
+  auto &controller = ROSWitmotionSensorController::Instance();
+  auto node = controller.Start(node_options);
+
+  // ★ ノードを Executor に登録して別スレッドで spin
   rclcpp::executors::SingleThreadedExecutor executor;
   executor.add_node(node);
 
-  std::thread spinThread([&executor, &app]() { executor.spin(); });
+  std::thread spin_thread([&executor]() {
+    executor.spin();
+  });
+  spin_thread.detach();
 
-  spinThread.detach();
   RCLCPP_INFO(rclcpp::get_logger("MinimalPublisher"), "QT spin !!!!!");
-  int result = app.exec();
-  return result;
+
+  // Qt のイベントループ開始
+  return app.exec();
 }
